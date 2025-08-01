@@ -1,0 +1,60 @@
+- filters:
+    include:
+      - max_size: 12GB
+        min_size: 5GB
+        created_after: 1d
+        created_before: 1d / this_month / this_year / this_day
+        modified_after: 1d
+        modified_before: 1d / this_month / this_year / this_day
+        extensions:
+          - .txt
+          - .md
+        paths:
+          - path/to
+      - modified_after: 3d
+        regex_paths:
+          - path/bla/*
+  comparaison:
+    type: datetime_size / content / size
+    fat_time_zone_shift: hh:mm  # handle time zone shift or DST for FAT <-> NTFS sync
+    preset: sync / mirror left to right / update left to right
+    actions:
+      use_cache: true
+      left:
+        created: copy_to_right / remove_from_left / nothing
+        updated: update_right / update_left / nothing
+        deleted: delete_right / copy_to_left / nothing
+      right:
+        created: copy_to_left / remove_from_right / nothing
+        updated: update_left / update_right / nothing
+        deleted: delete_left / copy_to_right / nothing
+    actions:
+      use_cache: false
+      only_exist_left:
+      more_recent_left:
+      more_recent_right:
+      only_exist_right:
+    actions:
+      use_cache: false
+      only_exist_left:
+      file_is_different:
+      only_exist_right:
+  synchronisation:
+    trigger:
+      on: running  # let another job do the scheduling
+      time:
+        engine: cron
+        cron: "0 0 * * *"
+    callbacks:
+      on_ending:
+      for_each_error:
+      for_all_errors:
+    conflict: warn
+  left:
+    type: files
+    base_path: path/to/left
+  right:
+    type: files
+    base_path: path/to/right
+  logs:
+    path/to/logs
