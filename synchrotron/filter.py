@@ -6,7 +6,7 @@ It builds up a collection of file details for each filesystem.
 
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 
 from synchrotron.configuration.filter import Filter, Filters
 from synchrotron.configuration.storage import Storage
@@ -40,35 +40,44 @@ class FilterSvc:
     ):
         """Walk through the left storage and apply filters."""
         base_path = self.left_storage.base_path
-        for filter_ in self.filters.include:
-            path_prefix = assemble_paths(base_path, filter_.path_prefix)
 
-            for path in filter_.paths:
-                path = assemble_paths(path_prefix, path)
+        include_path_gen = assemble_filters_paths(base_path, self.filters.include)
+        include_paths_expanded_details = expand_paths(
+            self.left_fs,
+            (include_path.as_posix() for include_path in include_path_gen),
+            recursive=True,
+            maxdepth=None,
+            detail=True,
+            withdirs=False,
+        )
 
-                expand_paths(
-                    self.left_fs,
-                    [path],
-                    recursive=True,
-                    maxdepth=None,
-                    detail=True,
-                    withdirs=False,
-                )
-                for left_file_details in self.left_fs.walk(
-                    path, on_error="raise", detail=include_details
-                ):
-                    # see if it matches the filter criteria
-                    ...
-
-            for regex_path in filter_.regex_paths:
-                regex_path = assemble_paths(path_prefix, regex_path)
-                for left_file_details in self.left_fs.glob(
-                    assemble_paths(base_path, regex_path), detail=include_details
-                ):
-                    # see if it matches the filter criteria
-                    ...
+        if self.filters.exclude is not None:
+            include_path_gen = assemble_filters_paths(base_path, self.filters.exclude)
+            exclude_files = expand_paths(
+                self.left_fs,
+                (include_path.as_posix() for include_path in include_path_gen),
+                recursive=True,
+                maxdepth=None,
+                detail=True,
+                withdirs=False,
+            )
 
     def meet_left_filter(self, file_details): ...
+
+
+def assemble_filters_paths(
+    base_path: Path | None, filters: list[Filter]
+) -> Generator[Path, None, None]:
+    for filter_ in filters:
+        path_prefix = assemble_paths(base_path, filter_.path_prefix)
+
+        for path in filter_.paths:
+            path = assemble_paths(path_prefix, path)
+
+            # because path (from the for loop) is necessarily not None, the new
+            # assembled path will never be None either
+            assert path is not None
+            yield path
 
 
 def assemble_paths(*components: Path | None) -> Path | None:
@@ -88,6 +97,7 @@ def include_or_exclude_file(file_details: dict[str, Any], filters: Filters) -> b
 
     If one of the include filters matches, the file is included.
     If one of the exclude filters matches, the file is excluded.
+    If both an include and exclude filters match, the file is included.
     """
     for include_filter in filters.include:
         if meet_filter(file_details, include_filter):
