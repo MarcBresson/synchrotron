@@ -12,8 +12,9 @@
         paths:
           - path/to
       - modified_after: 3d
-        regex_paths:
-          - path/bla/*
+    exclude:
+      - paths:
+          - path/to/private*
   comparaison:
     type: datetime_size / content / size
     fat_time_zone_shift: hh:mm  # handle time zone shift or DST for FAT <-> NTFS sync
