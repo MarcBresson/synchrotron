@@ -69,21 +69,15 @@ def expand_paths(
                 if maxdepth is not None and maxdepth <= 1:
                     continue
 
-                rec_paths = cast(
-                    dict[str, FileInfo],
-                    expand_paths(
-                        fs,
-                        list(expanded_paths),
-                        recursive=True,
-                        maxdepth=maxdepth - 1 if maxdepth is not None else None,
-                        detail=True,
-                        **kwargs,
-                    ),
+                rec_paths = expand_paths(
+                    fs,
+                    list(expanded_paths),
+                    recursive=True,
+                    maxdepth=maxdepth - 1 if maxdepth is not None else None,
+                    detail=True,
+                    **kwargs,
                 )
-                if detail is True:
-                    yield from rec_paths.items()
-                else:
-                    yield from rec_paths
+                yield from rec_paths
         elif recursive:
             rec = cast(
                 dict[str, dict],
