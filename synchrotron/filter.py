@@ -4,12 +4,14 @@ For each storage, we walk in the filesystems to find all elements that match the
 It builds up a collection of file details for each filesystem.
 """
 
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any, Generator, Literal, cast, overload
 
 from synchrotron.configuration.filter import Filter, Filters
 from synchrotron.configuration.storage import Storage
+from synchrotron.schema.atoms.fsspec_file_info import FileInfo
 from synchrotron.schema.filter_properties import (
     DateTimeProperty,
     NumericalInequalityProperty,
@@ -21,67 +23,111 @@ class FilterSvc:
     def __init__(
         self,
         filters: Filters,
-        left_storage: Storage,
-        right_storage: Storage,
+        file_storage: Storage,
     ):
         self.filters = filters
 
-        self.left_storage = left_storage
-        self.right_storage = right_storage
-        self.left_fs = left_storage.fs
-        self.right_fs = right_storage.fs
+        self.storage = file_storage
+        self.fs = file_storage.fs
 
     def backend_check(self):
         """check if backends support the operations needed by the filters"""
         ...
 
-    def walk_left(
-        self, include_details: bool = False, with_right_details: bool = False
-    ):
+    def walk(self):
         """Walk through the left storage and apply filters."""
-        base_path = self.left_storage.base_path
+        included_files = self.include_files()
 
-        include_path_gen = assemble_filters_paths(base_path, self.filters.include)
-        include_paths_expanded_details = expand_paths(
-            self.left_fs,
-            (include_path.as_posix() for include_path in include_path_gen),
-            recursive=True,
-            maxdepth=None,
-            detail=True,
-            withdirs=False,
-        )
+        if self.filters.exclude is None:
+            return included_files
 
-        if self.filters.exclude is not None:
-            include_path_gen = assemble_filters_paths(base_path, self.filters.exclude)
-            exclude_files = expand_paths(
-                self.left_fs,
-                (include_path.as_posix() for include_path in include_path_gen),
+        excluded_paths = set(self.exclude_files())
+
+        for included_file_path, included_file_details in included_files:
+            if included_file_path in excluded_paths:
+                yield included_file_path, included_file_details
+
+    def include_files(self) -> Iterator[tuple[str, FileInfo]]:
+        """
+        Finds all files that must be included.
+
+        Returns
+        -------
+        Iterator[tuple[str, FileInfo]]
+            generator that iterates over a path name and its associated details.
+        """
+        return self.meet_filters(self.filters.include, include_file_details=True)
+
+    def exclude_files(self) -> Iterator[str]:
+        """
+        Finds all file paths that must be excluded.
+
+        Returns
+        -------
+        Iterator[str]
+            generator that iterates over the file paths.
+        """
+        if self.filters.exclude is None:
+            raise ValueError("There are no exclude filters configured.")
+        return self.meet_filters(self.filters.exclude, include_file_details=False)
+
+    @overload
+    def meet_filters(
+        self, filters: list[Filter], include_file_details: Literal[True]
+    ) -> Iterator[tuple[str, FileInfo]]: ...
+    @overload
+    def meet_filters(
+        self, filters: list[Filter], include_file_details: Literal[False]
+    ) -> Iterator[str]: ...
+    def meet_filters(
+        self, filters: list[Filter], include_file_details: bool
+    ) -> Iterator[tuple[str, FileInfo]] | Iterator[str]:
+        base_path = self.storage.base_path
+
+        for filter_ in filters:
+            path_gen = assemble_filter_paths(base_path, filter_)
+            paths_expanded_details = expand_paths(
+                self.fs,
+                (path.as_posix() for path in path_gen),
                 recursive=True,
                 maxdepth=None,
                 detail=True,
                 withdirs=False,
             )
+            for file_path, file_info in paths_expanded_details:
+                if meet_filter(file_info, filter_):
+                    if include_file_details:
+                        yield file_path, file_info
+                    else:
+                        yield file_path
 
-    def meet_left_filter(self, file_details): ...
 
-
-def assemble_filters_paths(
-    base_path: Path | None, filters: list[Filter]
+def assemble_filter_paths(
+    base_path: Path | None, filter_: Filter
 ) -> Generator[Path, None, None]:
-    for filter_ in filters:
-        path_prefix = assemble_paths(base_path, filter_.path_prefix)
+    """Generate the full paths from a given filter and the storage base path."""
+    path_prefix = assemble_paths(base_path, filter_.path_prefix)
 
-        for path in filter_.paths:
-            path = assemble_paths(path_prefix, path)
+    for path in filter_.paths:
+        # because path (from the for loop) is necessarily not None, the new
+        # assembled path will never be None either
+        path = cast(Path, assemble_paths(path_prefix, path))
+        assert path is not None
+        yield path
 
-            # because path (from the for loop) is necessarily not None, the new
-            # assembled path will never be None either
-            assert path is not None
-            yield path
 
-
+@overload
+def assemble_paths(*components: None) -> None: ...
+@overload
+def assemble_paths(*components: Path) -> Path: ...
+@overload
+def assemble_paths(*components: Path | None) -> Path: ...
 def assemble_paths(*components: Path | None) -> Path | None:
-    """Build the path prefix based on the base path and the path prefix."""
+    """Build the path prefix based on the base path and the path prefix.
+
+    If all the components are None, then None will be returned.
+    Otherwise, the None components are going to be ignored.
+    """
     full_path = Path()
     for path in components:
         if path is not None:
@@ -92,27 +138,6 @@ def assemble_paths(*components: Path | None) -> Path | None:
     return full_path
 
 
-def include_or_exclude_file(file_details: dict[str, Any], filters: Filters) -> bool:
-    """Check if the file details should be included or excluded based on the filters.
-
-    If one of the include filters matches, the file is included.
-    If one of the exclude filters matches, the file is excluded.
-    If both an include and exclude filters match, the file is included.
-    """
-    for include_filter in filters.include:
-        if meet_filter(file_details, include_filter):
-            return True
-
-    if filters.exclude is None:
-        return False
-
-    for exclude_filter in filters.exclude:
-        if meet_filter(file_details, exclude_filter):
-            return False
-
-    return False
-
-
 MAP_PROPERTY_NAME_TO_DETAIL_ATTRIBUTES: dict[str, list[str]] = {
     "size": ["size"],
     "created": ["created"],
@@ -121,7 +146,7 @@ MAP_PROPERTY_NAME_TO_DETAIL_ATTRIBUTES: dict[str, list[str]] = {
 """map property names to the possible attributes in the file details dict"""
 
 
-def meet_filter(file_details: dict, filter_: Filter) -> bool:
+def meet_filter(file_details: FileInfo, filter_: Filter) -> bool:
     """Check if the file details meet the filter criteria."""
     filter_properties = filter_.used_filters()
     filter_result = True
@@ -143,7 +168,9 @@ def meet_filter(file_details: dict, filter_: Filter) -> bool:
     return True
 
 
-def compare_numerical(prop: NumericalInequalityProperty, file_details: dict) -> bool:
+def compare_numerical(
+    prop: NumericalInequalityProperty, file_details: FileInfo
+) -> bool:
     """Compare numerical properties in the file details."""
     value: float = find_prop_in_detail(prop.name, file_details)
     if prop.inequality_direction == "greater_than":
@@ -156,7 +183,7 @@ def compare_numerical(prop: NumericalInequalityProperty, file_details: dict) -> 
     return True
 
 
-def compare_datetime(prop: DateTimeProperty, file_details: dict) -> bool:
+def compare_datetime(prop: DateTimeProperty, file_details: FileInfo) -> bool:
     """Compare datetime properties in the file details."""
     value: float = find_prop_in_detail(prop.name, file_details)
     dt_value = datetime.fromtimestamp(value)
@@ -174,7 +201,7 @@ def compare_datetime(prop: DateTimeProperty, file_details: dict) -> bool:
     return True
 
 
-def find_prop_in_detail(prop_name: str, file_details: dict) -> Any:
+def find_prop_in_detail(prop_name: str, file_details: FileInfo) -> Any:
     """Find the property in the file details."""
     if prop_name in MAP_PROPERTY_NAME_TO_DETAIL_ATTRIBUTES:
         for attr in MAP_PROPERTY_NAME_TO_DETAIL_ATTRIBUTES[prop_name]:
