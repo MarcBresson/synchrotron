@@ -13,7 +13,7 @@ from typing import Iterator, Literal, Sequence, cast, overload
 
 from fsspec import AbstractFileSystem
 
-from synchrotron.schema.atoms.fsspec_file_info import FileInfo
+from synchrotron.schema.molecules.fsspec_file_info import FileInfo
 
 
 @overload

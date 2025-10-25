@@ -11,11 +11,11 @@ from typing import Any, Generator, Literal, cast, overload
 
 from synchrotron.configuration.filter import Filter, Filters
 from synchrotron.configuration.storage import Storage
-from synchrotron.schema.atoms.fsspec_file_info import FileInfo
 from synchrotron.schema.filter_properties import (
     DateTimeProperty,
     NumericalInequalityProperty,
 )
+from synchrotron.schema.molecules.fsspec_file_info import FileInfo
 from synchrotron.utils.paths_fsspec import expand_paths
 
 
@@ -35,7 +35,7 @@ class FilterSvc:
         ...
 
     def walk(self):
-        """Walk through the left storage and apply filters."""
+        """Walk through storage and yields file paths for matching files."""
         included_files = self.include_files()
 
         if self.filters.exclude is None:
@@ -161,7 +161,7 @@ def meet_filter(file_details: FileInfo, filter_: Filter) -> bool:
             return False
 
     if filter_.extensions is not None:
-        path = Path(file_details["path"])
+        path = Path(file_details["name"])
         if path.suffix.lstrip(".") not in filter_.extensions:
             return False
 

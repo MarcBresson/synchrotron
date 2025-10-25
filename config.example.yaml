@@ -54,8 +54,11 @@
   left:
     type: files
     base_path: path/to/left
+    id: 1
   right:
     type: files
     base_path: path/to/right
+    id: 2
   logs:
     path/to/logs
+  mode: "two-way-sync"

@@ -18,8 +18,17 @@ class Storage(BaseModel):
     options: StorageParameters = StorageParameters()
     base_path: Path | None = None
     """Base path for the storage. If not set, the root of the filesystem is used."""
+    id: int
+    """
+    Unique identifier for the storage. It is used for the cache DB to identify
+    to which storage the record belonged to.
+    """
 
     @cached_property
     def fs(self) -> AbstractFileSystem:
         """Return the filesystem object."""
         return filesystem(self.name, **self.options.model_dump())
+
+    def joinpath(self, path: str | Path) -> str:
+        base_path = self.base_path or ""
+        return str(base_path) + self.fs.sep + str(path)
